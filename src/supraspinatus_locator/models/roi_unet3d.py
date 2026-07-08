@@ -1,0 +1,48 @@
+from __future__ import annotations
+
+import torch
+from torch import nn
+
+
+class ConvBlock(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv3d(in_channels, out_channels, 3, padding=1),
+            nn.InstanceNorm3d(out_channels),
+            nn.LeakyReLU(0.01, inplace=True),
+            nn.Conv3d(out_channels, out_channels, 3, padding=1),
+            nn.InstanceNorm3d(out_channels),
+            nn.LeakyReLU(0.01, inplace=True),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+class ROIUNet3D(nn.Module):
+    """Small 3D U-Net for ROI occupancy/probability maps."""
+
+    def __init__(self, in_channels: int = 1, out_channels: int = 1, base_channels: int = 16):
+        super().__init__()
+        self.enc1 = ConvBlock(in_channels, base_channels)
+        self.down1 = nn.MaxPool3d(2)
+        self.enc2 = ConvBlock(base_channels, base_channels * 2)
+        self.down2 = nn.MaxPool3d(2)
+        self.bottleneck = ConvBlock(base_channels * 2, base_channels * 4)
+        self.up2 = nn.ConvTranspose3d(base_channels * 4, base_channels * 2, 2, stride=2)
+        self.dec2 = ConvBlock(base_channels * 4, base_channels * 2)
+        self.up1 = nn.ConvTranspose3d(base_channels * 2, base_channels, 2, stride=2)
+        self.dec1 = ConvBlock(base_channels * 2, base_channels)
+        self.head = nn.Conv3d(base_channels, out_channels, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        e1 = self.enc1(x)
+        e2 = self.enc2(self.down1(e1))
+        b = self.bottleneck(self.down2(e2))
+        d2 = self.up2(b)
+        d2 = self.dec2(torch.cat([d2, e2], dim=1))
+        d1 = self.up1(d2)
+        d1 = self.dec1(torch.cat([d1, e1], dim=1))
+        return self.head(d1)
+

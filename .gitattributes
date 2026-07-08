@@ -1,0 +1,18 @@
+* text=auto eol=lf
+
+*.py text diff=python
+*.md text
+*.txt text
+*.yaml text
+*.yml text
+*.json text
+*.csv text
+
+*.nii binary
+*.nii.gz binary
+*.zip binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.docx binary

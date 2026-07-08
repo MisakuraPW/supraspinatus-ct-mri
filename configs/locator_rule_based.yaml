@@ -1,0 +1,8 @@
+bone_threshold_hu: 180
+min_bone_component_voxels: 5000
+target_side: auto
+roi_size_mm: [34.0, 18.0, 12.0]
+roi_offset_from_bone_center_mm: [0.0, -6.0, 0.0]
+center_strategy: bone_bbox_fraction
+bone_bbox_fraction_xyz: [0.84, 0.10, 0.52]
+prefer_reference_mask_for_debug: false

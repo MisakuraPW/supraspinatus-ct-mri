@@ -1,0 +1,5 @@
+default_window_center: 80
+default_window_width: 500
+mask_alpha: 0.35
+pred_alpha: 0.30
+

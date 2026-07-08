@@ -1,0 +1,10 @@
+model: roi_unet3d
+input_channels: 1
+output_channels: 1
+patch_size: [96, 96, 64]
+spacing_mm: [0.8, 0.8, 0.8]
+batch_size: 1
+epochs: 200
+learning_rate: 0.0002
+loss: dice_bce
+
