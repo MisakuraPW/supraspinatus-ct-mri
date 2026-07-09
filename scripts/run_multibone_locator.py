@@ -31,7 +31,21 @@ def main() -> None:
         help="Use external mask as a TotalSeg-guided HU threshold ROI, or directly as the bone mask.",
     )
     parser.add_argument("--external-bone-dilation-voxels", type=int, default=4)
-    parser.add_argument("--selection-policy", choices=("legacy", "generalized"), default="legacy")
+    parser.add_argument(
+        "--selection-policy",
+        choices=(
+            "legacy",
+            "generalized",
+            "best_score",
+            "current_first",
+            "conservative",
+            "consensus",
+            "edge_priority",
+            "surface_suppressed",
+            "oracle",
+        ),
+        default="legacy",
+    )
     parser.add_argument("--export-candidates", action="store_true", help="Export per-case top-k candidate review sheets.")
     parser.add_argument("--candidate-preview-topk", type=int, default=8)
     parser.add_argument("--current-anchor-count", type=int, default=160)

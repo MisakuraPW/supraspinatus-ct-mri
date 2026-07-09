@@ -1628,6 +1628,141 @@ def select_generalized_candidate(model_rows: list[dict[str, object]], cfg: Multi
     return primary, "choose_generalized_current_anchor"
 
 
+def _row_float(row: dict[str, object], key: str, default: float = 0.0) -> float:
+    try:
+        value = row.get(key, default)
+        if value in ("", None):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def candidate_center_array(row: dict[str, object]) -> np.ndarray:
+    return np.asarray(
+        [
+            _row_float(row, "pred_center_x"),
+            _row_float(row, "pred_center_y"),
+            _row_float(row, "pred_center_z"),
+        ],
+        dtype=float,
+    )
+
+
+def row_distance_mm(a: dict[str, object], b: dict[str, object], spacing: np.ndarray) -> float:
+    delta = (candidate_center_array(a) - candidate_center_array(b)) * spacing
+    return float(np.sqrt(np.sum(delta * delta)))
+
+
+def source_consensus_score(row: dict[str, object], rows: list[dict[str, object]], spacing: np.ndarray, radius_mm: float = 8.0) -> float:
+    sources = set()
+    support = 0.0
+    for other in rows:
+        if other is row:
+            continue
+        dist = row_distance_mm(row, other, spacing)
+        if dist <= radius_mm:
+            sources.add(str(other.get("candidate_source", "")))
+            support += max(0.0, 1.0 - dist / radius_mm)
+    return float(len(sources) + 0.35 * support)
+
+
+def row_plausibility_score(row: dict[str, object], rows: list[dict[str, object]], spacing: np.ndarray, mode: str = "conservative") -> float:
+    source = str(row.get("candidate_source", ""))
+    total = _row_float(row, "total_score")
+    bone = _row_float(row, "bone_overlap")
+    near = _row_float(row, "near_bone_fraction")
+    margin = _row_float(row, "margin_bone_fraction")
+    body = _row_float(row, "body_inside_fraction", 1.0)
+    continuity = _row_float(row, "z_continuity_score", _row_float(row, "continuity_score"))
+    center_y = _row_float(row, "center_y_minus_humerus_top")
+    radius_dist = _row_float(row, "radius_normalized_distance", 1.0)
+    support_count = _row_float(row, "same_anchor_support_count")
+    bone_distance = _row_float(row, "bone_distance_mm", 6.0)
+    score = total
+    source_bias = {
+        "current_multibone": 0.42,
+        "bone_edge_tendon": 0.30,
+        "surface_arc": -0.24,
+        "low_z": 0.06,
+        "contact_z": 0.05,
+        "wide_xy": 0.05,
+        "teacher_z_refine": 0.0,
+    }
+    if mode == "edge_priority":
+        source_bias["bone_edge_tendon"] = 0.62
+        source_bias["surface_arc"] = -0.34
+    elif mode == "surface_suppressed":
+        source_bias["surface_arc"] = -0.58
+        source_bias["current_multibone"] = 0.58
+    score += source_bias.get(source, 0.0)
+    score += 0.34 * min(1.0, max(0.0, continuity))
+    score += 0.08 * min(4.0, support_count)
+    score += 0.42 * source_consensus_score(row, rows, spacing)
+    if body < 0.94:
+        score -= 2.0 * (0.94 - body) / 0.06
+    if bone > 0.075:
+        score -= 1.15 * (bone - 0.075) / 0.06
+    if near > 0.18:
+        score -= 0.75 * (near - 0.18) / 0.12
+    if margin > 0.22:
+        score -= 0.35 * (margin - 0.22) / 0.18
+    if not (-8.0 <= center_y <= 34.0):
+        score -= 0.04 * min(30.0, abs(center_y - 12.0))
+    if not (0.70 <= radius_dist <= 1.65):
+        score -= 0.50 * min(2.0, abs(radius_dist - 1.05))
+    if bone_distance < 0.5:
+        score -= 0.70
+    elif bone_distance > 18.0:
+        score -= 0.035 * min(20.0, bone_distance - 18.0)
+    if source == "surface_arc":
+        nearest_current = min(
+            (row_distance_mm(row, other, spacing) for other in rows if other.get("candidate_source") == "current_multibone"),
+            default=99.0,
+        )
+        if nearest_current > 10.0:
+            score -= 0.75
+        if nearest_current > 16.0:
+            score -= 0.85
+    return float(score)
+
+
+def select_scored_candidate(rows: list[dict[str, object]], spacing: np.ndarray, mode: str) -> tuple[dict[str, object], str]:
+    scored = []
+    for row in rows:
+        row = dict(row)
+        row["selection_score"] = round(row_plausibility_score(row, rows, spacing, mode=mode), 4)
+        scored.append(row)
+    scored.sort(key=lambda row: _row_float(row, "selection_score"), reverse=True)
+    return scored[0], f"choose_{mode}_selection_score"
+
+
+def select_consensus_candidate(rows: list[dict[str, object]], spacing: np.ndarray) -> tuple[dict[str, object], str]:
+    scored = []
+    for row in rows:
+        row = dict(row)
+        row["selection_score"] = round(
+            row_plausibility_score(row, rows, spacing, mode="conservative")
+            + 0.65 * source_consensus_score(row, rows, spacing, radius_mm=7.0),
+            4,
+        )
+        scored.append(row)
+    scored.sort(key=lambda row: _row_float(row, "selection_score"), reverse=True)
+    return scored[0], "choose_cross_source_consensus"
+
+
+def select_oracle_candidate(rows: list[dict[str, object]]) -> tuple[dict[str, object], str]:
+    ranked = sorted(
+        rows,
+        key=lambda row: (
+            _row_float(row, "center_error_mm", 9999.0),
+            -_row_float(row, "doctor_roi_coverage"),
+            -_row_float(row, "bbox_iou"),
+        ),
+    )
+    return ranked[0], "oracle_uses_doctor_roi_for_upper_bound"
+
+
 def process_dataset(
     data_dir: str | Path,
     output_dir: str | Path,
@@ -2103,6 +2238,22 @@ def process_dataset(
 
         if selection_policy == "generalized":
             selected, decision_reason = select_generalized_candidate(model_rows, cfg)
+        elif selection_policy == "best_score":
+            selected = source_top_rows[0]
+            decision_reason = "choose_highest_raw_total_score"
+        elif selection_policy == "current_first":
+            selected = current_rows[0] if current_rows else source_top_rows[0]
+            decision_reason = "choose_current_multibone_first"
+        elif selection_policy == "conservative":
+            selected, decision_reason = select_scored_candidate(source_top_rows, spacing, mode="conservative")
+        elif selection_policy == "consensus":
+            selected, decision_reason = select_consensus_candidate(source_top_rows, spacing)
+        elif selection_policy == "edge_priority":
+            selected, decision_reason = select_scored_candidate(source_top_rows, spacing, mode="edge_priority")
+        elif selection_policy == "surface_suppressed":
+            selected, decision_reason = select_scored_candidate(source_top_rows, spacing, mode="surface_suppressed")
+        elif selection_policy == "oracle":
+            selected, decision_reason = select_oracle_candidate(source_top_rows)
 
         selected_id = str(selected["candidate_id"])
         selected_mask = evaluated_masks[selected_id]

@@ -482,6 +482,8 @@ def loocv_predictions(labeled_candidates: list[dict[str, object]]) -> tuple[list
 
 
 def train_from_labeled_rows(training_rows: list[dict[str, object]], target_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    if not target_rows:
+        return []
     if not training_rows or len({int(row["ranker_label"]) for row in training_rows}) < 2:
         for row in target_rows:
             row["learning_score"] = unified_static_score(row)
