@@ -17,6 +17,22 @@ from supraspinatus_locator.data.nifti_io import load_nifti
 from supraspinatus_locator.preprocessing.totalseg_bones import SHOULDER_BONE_CLASSES, save_combined_shoulder_bone_mask
 
 
+def classify_failure(stdout: str, stderr: str) -> tuple[str, str]:
+    combined = f"{stdout}\n{stderr}".lower()
+    hints: list[str] = []
+    if "chunkedencodingerror" in combined or "incompleteread" in combined or "connection broken" in combined:
+        hints.append("weight_download_interrupted")
+    if "no gpu detected" in combined or "cuda initialization" in combined or "driver on your system is too old" in combined:
+        hints.append("gpu_unavailable_or_torch_cuda_mismatch")
+    if "no space left on device" in combined:
+        hints.append("disk_full")
+    if "modulenotfounderror" in combined or "command not found" in combined:
+        hints.append("totalsegmentator_install_or_path_error")
+    if not hints:
+        hints.append("see_stdout_stderr")
+    return "failed_" + "_".join(hints[:2]), ";".join(hints)
+
+
 def find_ct_60kev(case_dir: Path) -> Path:
     ct_dir = case_dir / "CT"
     matches = sorted(path for path in ct_dir.iterdir() if path.is_file() and "60" in path.name.lower() and ".nii" in path.name.lower())
@@ -89,6 +105,7 @@ def run_case(args: argparse.Namespace, case_dir: Path, output_dir: Path) -> dict
         "command": " ".join(cmd),
         "returncode": "",
         "status": "pending",
+        "failure_hint": "",
         "loaded_classes": "",
         "combined_voxels": "",
         "report_path": str(report_path),
@@ -112,7 +129,9 @@ def run_case(args: argparse.Namespace, case_dir: Path, output_dir: Path) -> dict
     (case_out / "stderr.txt").write_text(result.stderr, encoding="utf-8", errors="replace")
     row["returncode"] = result.returncode
     if result.returncode != 0:
-        row["status"] = "failed"
+        status, hint = classify_failure(result.stdout, result.stderr)
+        row["status"] = status
+        row["failure_hint"] = hint
         return row
 
     image = load_nifti(ct_path)
@@ -133,6 +152,7 @@ def write_summary(rows: list[dict[str, object]], output_path: Path) -> None:
         "case",
         "status",
         "returncode",
+        "failure_hint",
         "combined_voxels",
         "loaded_classes",
         "runtime_seconds",
@@ -160,6 +180,7 @@ def main() -> None:
     parser.add_argument("--statistics", action="store_true", help="Request statistics.json and statistics_extra.")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--skip-existing", action="store_true")
+    parser.add_argument("--stop-on-fail", action="store_true", help="Stop the batch immediately when one case fails.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--totalseg-command", default="auto", help="Command prefix, or 'auto' for installed/local CLI.")
     args = parser.parse_args()
@@ -170,6 +191,11 @@ def main() -> None:
         row = run_case(args, case_dir, Path(args.output_dir))
         rows.append(row)
         print(f"  {row['status']} returncode={row['returncode']} combined={row['combined_voxels']}")
+        if row.get("failure_hint"):
+            print(f"  hint={row['failure_hint']}")
+        if args.stop_on_fail and str(row["status"]).startswith("failed"):
+            print("stopped on first failure because --stop-on-fail was set")
+            break
     write_summary(rows, Path(args.output_dir) / "totalseg_shoulder_bones_summary.csv")
     print(f"wrote summary to {Path(args.output_dir) / 'totalseg_shoulder_bones_summary.csv'}")
 
