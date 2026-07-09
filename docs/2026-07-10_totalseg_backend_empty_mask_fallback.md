@@ -49,6 +49,7 @@ python scripts/run_multibone_locator.py \
   --output-dir outputs/2026-07_totalseg_bone_backend_locator \
   --bone-mask-dir outputs/2026-07_totalseg_shoulder_bones \
   --allow-threshold-bone-fallback \
+  --external-bone-mode threshold_roi \
   --surface-arc-enable \
   --bone-edge-enable \
   --selection-policy generalized \
@@ -65,3 +66,4 @@ python scripts/run_multibone_locator.py \
 
 这个修复不是说 TotalSegmentator 的空 mask 被修好了，而是让它作为外部骨后端时不会拖垮整批实验。对于 `LHY/ZH/HMC` 这类异常病例，后续仍应单独查看 TotalSegmentator 输出，判断是输入 CT、方向、裁剪范围、fast 模型分辨率，还是 TotalSegmentator 对肩部小范围 CT 的泛化问题。
 
+后续又新增了 `threshold_roi` 模式：TotalSegmentator 的有效 mask 默认不再直接替换 HU 骨阈值，而是作为空间先验，引导提取 CT 中的 `HU > 300` 骨皮质。这样更符合旧多骨锚点方法的形态假设。

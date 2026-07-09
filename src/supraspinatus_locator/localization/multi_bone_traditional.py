@@ -1500,6 +1500,23 @@ def write_csv_union(path: Path, rows: list[dict[str, object]]) -> None:
         writer.writerows(rows)
 
 
+def make_external_guided_threshold_mask(
+    image: np.ndarray,
+    external_mask: np.ndarray,
+    bone_threshold_hu: float,
+    dilation_voxels: int,
+) -> np.ndarray:
+    roi = np.asarray(external_mask, dtype=bool)
+    if dilation_voxels > 0:
+        try:
+            from scipy.ndimage import binary_dilation
+
+            roi = binary_dilation(roi, iterations=int(dilation_voxels))
+        except Exception:
+            pass
+    return (image > bone_threshold_hu) & roi
+
+
 def candidate_quality_flags(row: dict[str, object]) -> dict[str, object]:
     anchor_width = float(row["humerus_anchor_x2"]) - float(row["humerus_anchor_x1"]) + 1.0
     anchor_height = float(row["humerus_anchor_y2"]) - float(row["humerus_anchor_y1"]) + 1.0
@@ -1624,6 +1641,8 @@ def process_dataset(
     bone_mask_filename: str = "shoulder_bones_combined.nii.gz",
     allow_threshold_bone_fallback: bool = False,
     min_external_bone_voxels: int = 10000,
+    external_bone_mode: str = "threshold_roi",
+    external_bone_dilation_voxels: int = 4,
 ) -> None:
     cfg = config or MultiBoneConfig()
     data_dir = Path(data_dir)
@@ -1655,8 +1674,8 @@ def process_dataset(
         if bone_mask_dir is not None:
             external_bone_path = Path(bone_mask_dir) / case_dir.name / bone_mask_filename
             if external_bone_path.exists():
-                bone_mask_override = load_mask_compatible(external_bone_path, image.shape)
-                external_bone_voxels = int(np.asarray(bone_mask_override, dtype=bool).sum())
+                external_mask = load_mask_compatible(external_bone_path, image.shape)
+                external_bone_voxels = int(np.asarray(external_mask, dtype=bool).sum())
                 if external_bone_voxels < min_external_bone_voxels:
                     if allow_threshold_bone_fallback:
                         print(
@@ -1672,7 +1691,37 @@ def process_dataset(
                             "Rerun TotalSegmentator for this case or pass --allow-threshold-bone-fallback."
                         )
                 else:
-                    bone_mask_source = str(external_bone_path)
+                    if external_bone_mode == "direct":
+                        bone_mask_override = external_mask
+                        bone_mask_source = str(external_bone_path)
+                    elif external_bone_mode == "threshold_roi":
+                        bone_mask_override = make_external_guided_threshold_mask(
+                            image,
+                            external_mask,
+                            cfg.bone_threshold_hu,
+                            external_bone_dilation_voxels,
+                        )
+                        guided_voxels = int(np.asarray(bone_mask_override, dtype=bool).sum())
+                        bone_mask_source = (
+                            f"threshold_roi:{external_bone_path}:"
+                            f"dilation={external_bone_dilation_voxels}:voxels={guided_voxels}"
+                        )
+                        if guided_voxels < min_external_bone_voxels:
+                            if allow_threshold_bone_fallback:
+                                print(
+                                    f"{case_dir.name}: TotalSeg-guided HU bone mask has {guided_voxels} voxels "
+                                    f"(< {min_external_bone_voxels}); falling back to full HU threshold."
+                                )
+                                bone_mask_override = None
+                                bone_mask_source = f"threshold_fallback_sparse_guided_external:{external_bone_path}"
+                            else:
+                                raise ValueError(
+                                    f"TotalSeg-guided HU bone mask for {case_dir.name} is too small "
+                                    f"({guided_voxels} voxels < {min_external_bone_voxels}): {external_bone_path}. "
+                                    "Pass --allow-threshold-bone-fallback or lower --min-external-bone-voxels."
+                                )
+                    else:
+                        raise ValueError(f"Unknown external_bone_mode: {external_bone_mode}")
             elif not allow_threshold_bone_fallback:
                 raise FileNotFoundError(f"External bone mask not found for {case_dir.name}: {external_bone_path}")
             else:
