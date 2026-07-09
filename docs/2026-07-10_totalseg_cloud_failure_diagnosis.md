@@ -79,6 +79,7 @@ python scripts/run_totalseg_shoulder_bones.py \
   --cases HMC \
   --fast \
   --device gpu \
+  --require-gpu \
   --stop-on-fail
 ```
 
@@ -102,9 +103,30 @@ python scripts/run_totalseg_shoulder_bones.py \
   --output-dir outputs/2026-07_totalseg_shoulder_bones \
   --fast \
   --device gpu \
+  --require-gpu \
   --skip-existing \
   --stop-on-fail
 ```
+
+## 如果命令传了 GPU，但 summary 显示 CPU
+
+`totalseg_shoulder_bones_summary.csv` 中的 `command` 是本项目脚本传给 TotalSegmentator 的命令；如果其中包含 `-d gpu`，说明脚本确实请求了 GPU。
+
+`device` 字段来自 TotalSegmentator 的 `run_report.json`，更接近实际推理设备。如果 `command` 有 `-d gpu`，但 `device` 仍为 `cpu`，通常表示 PyTorch/CUDA 环境不可用，TotalSegmentator 收到 GPU 请求后退回 CPU。
+
+更新后的脚本会在 `--device gpu` 时打印：
+
+```text
+torch device check: torch=... cuda_build=... cuda_available=... gpu=...
+```
+
+如果不希望它静默退回 CPU，请加：
+
+```bash
+--require-gpu
+```
+
+此时只要 `torch.cuda.is_available()` 为 `False`，脚本会在跑病例前直接停止。
 
 ## 本次代码改动
 
@@ -114,4 +136,4 @@ python scripts/run_totalseg_shoulder_bones.py \
 - 下载中断识别：`ChunkedEncodingError`、`IncompleteRead`、`connection broken`。
 - GPU 环境异常识别：`No GPU detected`、`CUDA initialization`、驱动过旧。
 - `--stop-on-fail`：第一例失败时立即停止，避免批量任务继续空跑。
-
+- `--require-gpu`：要求 GPU 必须可用，否则在病例运行前停止。

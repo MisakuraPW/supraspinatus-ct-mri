@@ -17,6 +17,31 @@ from supraspinatus_locator.data.nifti_io import load_nifti
 from supraspinatus_locator.preprocessing.totalseg_bones import SHOULDER_BONE_CLASSES, save_combined_shoulder_bone_mask
 
 
+def get_torch_device_info() -> dict[str, object]:
+    info: dict[str, object] = {
+        "torch_available": False,
+        "torch_version": "",
+        "torch_cuda_build": "",
+        "cuda_available": False,
+        "cuda_device_count": 0,
+        "cuda_device_name": "",
+        "error": "",
+    }
+    try:
+        import torch
+
+        info["torch_available"] = True
+        info["torch_version"] = torch.__version__
+        info["torch_cuda_build"] = torch.version.cuda or ""
+        info["cuda_available"] = bool(torch.cuda.is_available())
+        if info["cuda_available"]:
+            info["cuda_device_count"] = torch.cuda.device_count()
+            info["cuda_device_name"] = torch.cuda.get_device_name(0)
+    except Exception as exc:
+        info["error"] = str(exc)
+    return info
+
+
 def classify_failure(stdout: str, stderr: str) -> tuple[str, str]:
     combined = f"{stdout}\n{stderr}".lower()
     hints: list[str] = []
@@ -176,6 +201,7 @@ def main() -> None:
     parser.add_argument("--output-dir", default="outputs/2026-07_totalseg_shoulder_bones")
     parser.add_argument("--cases", nargs="*", default=None)
     parser.add_argument("--device", default="cpu", choices=("cpu", "gpu", "mps"))
+    parser.add_argument("--require-gpu", action="store_true", help="Fail before running cases if --device gpu is requested but torch CUDA is unavailable.")
     parser.add_argument("--fast", action="store_true", help="Use lower-resolution TotalSegmentator model.")
     parser.add_argument("--statistics", action="store_true", help="Request statistics.json and statistics_extra.")
     parser.add_argument("--quiet", action="store_true")
@@ -184,6 +210,21 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--totalseg-command", default="auto", help="Command prefix, or 'auto' for installed/local CLI.")
     args = parser.parse_args()
+
+    if args.device == "gpu":
+        device_info = get_torch_device_info()
+        print(
+            "torch device check: "
+            f"torch={device_info['torch_version'] or 'unavailable'} "
+            f"cuda_build={device_info['torch_cuda_build'] or 'none'} "
+            f"cuda_available={device_info['cuda_available']} "
+            f"gpu={device_info['cuda_device_name'] or 'none'}"
+        )
+        if args.require_gpu and not device_info["cuda_available"]:
+            raise SystemExit(
+                "ERROR: --require-gpu was set, but torch.cuda.is_available() is False. "
+                "Fix the cloud CUDA/PyTorch environment or run with --device cpu."
+            )
 
     rows = []
     for case_dir in discover_cases(Path(args.data_dir), args.cases):
