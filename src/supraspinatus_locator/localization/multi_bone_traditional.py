@@ -1623,6 +1623,7 @@ def process_dataset(
     bone_mask_dir: str | Path | None = None,
     bone_mask_filename: str = "shoulder_bones_combined.nii.gz",
     allow_threshold_bone_fallback: bool = False,
+    min_external_bone_voxels: int = 10000,
 ) -> None:
     cfg = config or MultiBoneConfig()
     data_dir = Path(data_dir)
@@ -1650,13 +1651,32 @@ def process_dataset(
         image = image_volume.data.astype(np.float32)
         bone_mask_override = None
         bone_mask_source = "threshold"
+        external_bone_voxels = ""
         if bone_mask_dir is not None:
             external_bone_path = Path(bone_mask_dir) / case_dir.name / bone_mask_filename
             if external_bone_path.exists():
                 bone_mask_override = load_mask_compatible(external_bone_path, image.shape)
-                bone_mask_source = str(external_bone_path)
+                external_bone_voxels = int(np.asarray(bone_mask_override, dtype=bool).sum())
+                if external_bone_voxels < min_external_bone_voxels:
+                    if allow_threshold_bone_fallback:
+                        print(
+                            f"{case_dir.name}: external bone mask has {external_bone_voxels} voxels "
+                            f"(< {min_external_bone_voxels}); falling back to HU threshold."
+                        )
+                        bone_mask_override = None
+                        bone_mask_source = f"threshold_fallback_invalid_external:{external_bone_path}"
+                    else:
+                        raise ValueError(
+                            f"External bone mask for {case_dir.name} is too small "
+                            f"({external_bone_voxels} voxels < {min_external_bone_voxels}): {external_bone_path}. "
+                            "Rerun TotalSegmentator for this case or pass --allow-threshold-bone-fallback."
+                        )
+                else:
+                    bone_mask_source = str(external_bone_path)
             elif not allow_threshold_bone_fallback:
                 raise FileNotFoundError(f"External bone mask not found for {case_dir.name}: {external_bone_path}")
+            else:
+                bone_mask_source = f"threshold_fallback_missing_external:{external_bone_path}"
         doctor_roi = load_nifti(roi_path).data != 0
         doctor_box = bbox_from_mask(doctor_roi)
         if doctor_box is None:
@@ -1675,7 +1695,16 @@ def process_dataset(
             cfg.teacher_z_center = None
             cfg.teacher_center_xyz = None
 
-        candidates = locate_multibone_candidates(image, cfg, top_k=max(cfg.top_k * 4, 20), bone_mask_override=bone_mask_override)
+        try:
+            candidates = locate_multibone_candidates(image, cfg, top_k=max(cfg.top_k * 4, 20), bone_mask_override=bone_mask_override)
+        except ValueError as exc:
+            if bone_mask_override is not None and allow_threshold_bone_fallback:
+                print(f"{case_dir.name}: candidate generation failed with external bone mask ({exc}); retrying HU threshold.")
+                bone_mask_override = None
+                bone_mask_source = f"threshold_fallback_generation_failed:{bone_mask_source}"
+                candidates = locate_multibone_candidates(image, cfg, top_k=max(cfg.top_k * 4, 20), bone_mask_override=None)
+            else:
+                raise ValueError(f"{case_dir.name}: {exc}") from exc
         bone_mask = bone_mask_override if bone_mask_override is not None else image > cfg.bone_threshold_hu
         doctor_center = np.argwhere(doctor_roi).mean(axis=0)
 
@@ -1701,6 +1730,7 @@ def process_dataset(
             row = {
                 "case": case_dir.name,
                 "bone_mask_source": bone_mask_source,
+                "external_bone_voxels": external_bone_voxels,
                 "candidate_id": f"{case_dir.name}_{idx:03d}",
                 "candidate_source": candidate.candidate_source,
                 "rank": idx,

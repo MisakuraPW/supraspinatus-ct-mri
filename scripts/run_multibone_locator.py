@@ -23,6 +23,7 @@ def main() -> None:
     parser.add_argument("--bone-mask-dir", default=None, help="Optional external bone masks: <dir>/<case>/shoulder_bones_combined.nii.gz.")
     parser.add_argument("--bone-mask-filename", default="shoulder_bones_combined.nii.gz")
     parser.add_argument("--allow-threshold-bone-fallback", action="store_true")
+    parser.add_argument("--min-external-bone-voxels", type=int, default=10000, help="Treat smaller external bone masks as invalid when fallback is allowed.")
     parser.add_argument("--selection-policy", choices=("legacy", "generalized"), default="legacy")
     parser.add_argument("--export-candidates", action="store_true", help="Export per-case top-k candidate review sheets.")
     parser.add_argument("--candidate-preview-topk", type=int, default=8)
@@ -193,6 +194,7 @@ def main() -> None:
         bone_mask_dir=args.bone_mask_dir,
         bone_mask_filename=args.bone_mask_filename,
         allow_threshold_bone_fallback=args.allow_threshold_bone_fallback,
+        min_external_bone_voxels=args.min_external_bone_voxels,
     )
     print(f"wrote outputs to {args.output_dir}")
 
