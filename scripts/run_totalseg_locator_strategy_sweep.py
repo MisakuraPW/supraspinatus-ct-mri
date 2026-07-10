@@ -66,6 +66,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run TotalSeg-guided locator strategy sweep.")
     parser.add_argument("--data-dir", default="Data/label")
     parser.add_argument("--bone-mask-dir", default="outputs/2026-07_totalseg_shoulder_bones")
+    parser.add_argument("--bone-mask-filename", default="shoulder_bones_combined.nii.gz")
     parser.add_argument("--output-root", default="outputs/2026-07_totalseg_locator_strategy_sweep")
     parser.add_argument("--cases", nargs="*", default=None)
     parser.add_argument("--quick", action="store_true", help="Run core policies only.")
@@ -107,6 +108,8 @@ def main() -> None:
                 [
                     "--bone-mask-dir",
                     args.bone_mask_dir,
+                    "--bone-mask-filename",
+                    args.bone_mask_filename,
                     "--allow-threshold-bone-fallback",
                     "--min-external-bone-voxels",
                     str(args.min_external_bone_voxels),
