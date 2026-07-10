@@ -16,16 +16,19 @@ def build_experiments(quick: bool) -> list[dict[str, object]]:
         {"name": "04_threshold_roi_consensus", "policy": "consensus", "mode": "threshold_roi", "dilation": 4, "bone": True},
         {"name": "05_threshold_roi_edge_priority", "policy": "edge_priority", "mode": "threshold_roi", "dilation": 4, "bone": True},
         {"name": "06_threshold_roi_surface_suppressed", "policy": "surface_suppressed", "mode": "threshold_roi", "dilation": 4, "bone": True},
-        {"name": "07_hu_conservative_baseline", "policy": "conservative", "mode": "", "dilation": 0, "bone": False},
-        {"name": "08_threshold_roi_oracle_upper_bound", "policy": "oracle", "mode": "threshold_roi", "dilation": 4, "bone": True},
+        {"name": "07_threshold_roi_adaptive_edge_guarded", "policy": "adaptive_edge_guarded", "mode": "threshold_roi", "dilation": 4, "bone": True},
+        {"name": "08_hu_conservative_baseline", "policy": "conservative", "mode": "", "dilation": 0, "bone": False},
+        {"name": "09_hu_adaptive_edge_guarded", "policy": "adaptive_edge_guarded", "mode": "", "dilation": 0, "bone": False},
+        {"name": "10_threshold_roi_oracle_upper_bound", "policy": "oracle", "mode": "threshold_roi", "dilation": 4, "bone": True},
     ]
     if not quick:
         experiments.extend(
             [
-                {"name": "09_threshold_roi_conservative_dilate2", "policy": "conservative", "mode": "threshold_roi", "dilation": 2, "bone": True},
-                {"name": "10_threshold_roi_conservative_dilate8", "policy": "conservative", "mode": "threshold_roi", "dilation": 8, "bone": True},
-                {"name": "11_threshold_roi_consensus_dilate8", "policy": "consensus", "mode": "threshold_roi", "dilation": 8, "bone": True},
-                {"name": "12_direct_conservative_probe", "policy": "conservative", "mode": "direct", "dilation": 0, "bone": True},
+                {"name": "11_threshold_roi_conservative_dilate2", "policy": "conservative", "mode": "threshold_roi", "dilation": 2, "bone": True},
+                {"name": "12_threshold_roi_conservative_dilate8", "policy": "conservative", "mode": "threshold_roi", "dilation": 8, "bone": True},
+                {"name": "13_threshold_roi_consensus_dilate8", "policy": "consensus", "mode": "threshold_roi", "dilation": 8, "bone": True},
+                {"name": "14_threshold_roi_adaptive_edge_guarded_dilate8", "policy": "adaptive_edge_guarded", "mode": "threshold_roi", "dilation": 8, "bone": True},
+                {"name": "15_direct_conservative_probe", "policy": "conservative", "mode": "direct", "dilation": 0, "bone": True},
             ]
         )
     return experiments

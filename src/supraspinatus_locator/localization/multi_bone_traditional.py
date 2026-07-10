@@ -1763,6 +1763,82 @@ def select_oracle_candidate(rows: list[dict[str, object]]) -> tuple[dict[str, ob
     return ranked[0], "oracle_uses_doctor_roi_for_upper_bound"
 
 
+def edge_guard_score(row: dict[str, object]) -> float:
+    cy = _row_float(row, "center_y_minus_humerus_top")
+    bone = _row_float(row, "bone_overlap")
+    near = _row_float(row, "near_bone_fraction")
+    score = _row_float(row, "total_score")
+    score += 0.25 * min(1.0, _row_float(row, "continuity_score"))
+    score += 0.05 * min(5.0, _row_float(row, "same_anchor_support_count"))
+    score -= 0.06 * abs(cy + 2.0)
+    if 0.008 <= bone <= 0.065:
+        score += 0.35
+    elif bone > 0.085:
+        score -= 0.70
+    if near > 0.16:
+        score -= 0.45
+    return float(score)
+
+
+def select_adaptive_edge_guarded(rows: list[dict[str, object]]) -> tuple[dict[str, object], str]:
+    sorted_rows = sorted(rows, key=lambda row: _row_float(row, "total_score"), reverse=True)
+    current_rows = [row for row in sorted_rows if row.get("candidate_source") == "current_multibone"]
+    current = current_rows[0] if current_rows else sorted_rows[0]
+    bone_source = str(current.get("bone_mask_source", ""))
+    if bone_source.startswith("threshold_fallback_invalid"):
+        current = dict(current)
+        current["needs_review"] = False
+        current["review_reason"] = "invalid_totalseg_mask_use_current"
+        return current, "adaptive_edge_guarded_invalid_totalseg_current"
+
+    current_detached = (
+        _row_float(current, "bone_overlap") <= 0.001
+        and _row_float(current, "near_bone_fraction") <= 0.002
+        and _row_float(current, "margin_bone_fraction") <= 0.035
+    )
+    current_weak = (
+        _row_float(current, "continuity_score") < 0.60
+        or _row_float(current, "same_anchor_support_count") <= 2
+        or current_detached
+        or (_row_float(current, "total_score") < 5.0 and _row_float(current, "center_y_minus_humerus_top") <= -7.0)
+    )
+
+    edge_rows = [
+        row
+        for row in sorted_rows
+        if row.get("candidate_source") == "bone_edge_tendon"
+        and _row_float(row, "body_inside_fraction", 1.0) >= 0.94
+        and _row_float(row, "bone_overlap") <= 0.075
+        and _row_float(row, "near_bone_fraction") <= 0.16
+        and -12.5 <= _row_float(row, "center_y_minus_humerus_top") <= 8.5
+        and 1.15 <= _row_float(row, "radius_normalized_distance", 1.0) <= 1.90
+    ]
+    edge_rows.sort(key=edge_guard_score, reverse=True)
+    if current_weak and edge_rows:
+        best_edge = edge_rows[0]
+        allowed_gap = 1.20 if current_detached else 1.70 if _row_float(current, "same_anchor_support_count") <= 2 else 0.40
+        if edge_guard_score(best_edge) >= _row_float(current, "total_score") - allowed_gap:
+            selected = dict(best_edge)
+            selected["needs_review"] = False
+            selected["review_reason"] = "edge_rescue_current_weak"
+            selected["edge_guard_score"] = round(edge_guard_score(best_edge), 4)
+            return selected, "adaptive_edge_guarded_edge_rescue"
+
+    selected = dict(current)
+    if edge_rows:
+        best_edge = edge_rows[0]
+        distance_like_gap = abs(_row_float(current, "center_y_minus_humerus_top") - _row_float(best_edge, "center_y_minus_humerus_top"))
+        selected["review_alternative_candidate_id"] = best_edge.get("candidate_id", "")
+        selected["review_alternative_source"] = best_edge.get("candidate_source", "")
+        selected["review_alternative_score"] = round(edge_guard_score(best_edge), 4)
+        selected["needs_review"] = bool(distance_like_gap >= 12.0 and edge_guard_score(best_edge) >= _row_float(current, "total_score") - 0.60)
+        selected["review_reason"] = "current_edge_disagreement" if selected["needs_review"] else "current_selected"
+    else:
+        selected["needs_review"] = False
+        selected["review_reason"] = "current_selected_no_edge_candidate"
+    return selected, "adaptive_edge_guarded_current_default"
+
+
 def process_dataset(
     data_dir: str | Path,
     output_dir: str | Path,
@@ -2252,6 +2328,8 @@ def process_dataset(
             selected, decision_reason = select_scored_candidate(source_top_rows, spacing, mode="edge_priority")
         elif selection_policy == "surface_suppressed":
             selected, decision_reason = select_scored_candidate(source_top_rows, spacing, mode="surface_suppressed")
+        elif selection_policy == "adaptive_edge_guarded":
+            selected, decision_reason = select_adaptive_edge_guarded(source_top_rows)
         elif selection_policy == "oracle":
             selected, decision_reason = select_oracle_candidate(source_top_rows)
 

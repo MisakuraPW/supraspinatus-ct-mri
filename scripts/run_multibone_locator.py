@@ -42,6 +42,7 @@ def main() -> None:
             "consensus",
             "edge_priority",
             "surface_suppressed",
+            "adaptive_edge_guarded",
             "oracle",
         ),
         default="legacy",
