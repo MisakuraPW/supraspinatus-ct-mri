@@ -68,7 +68,15 @@ def find_ct_60kev(case_dir: Path) -> Path:
 
 
 def discover_cases(data_dir: Path, case_names: list[str] | None) -> list[Path]:
-    cases = sorted(path for path in data_dir.iterdir() if path.is_dir())
+    cases = []
+    for path in sorted(p for p in data_dir.iterdir() if p.is_dir()):
+        if not (path / "CT").is_dir():
+            continue
+        try:
+            find_ct_60kev(path)
+        except FileNotFoundError:
+            continue
+        cases.append(path)
     if case_names:
         wanted = set(case_names)
         cases = [path for path in cases if path.name in wanted]

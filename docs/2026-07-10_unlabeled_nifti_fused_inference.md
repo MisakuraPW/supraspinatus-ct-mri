@@ -36,6 +36,8 @@ python scripts/run_multibone_nifti_inference.py \
   --candidate-preview-topk 8
 ```
 
+`outputs/2026-07_unlabel_ct_nifti` 中会包含一个 `_previews` 目录，里面只有转换质量预览图，不是病例。TotalSeg 和融合脚本会自动跳过这种没有 `CT/60kev.nii.gz` 的目录。
+
 ## 输出
 
 - `results/per_case_inference.csv`：每例最终 ROI 和候选特征。
