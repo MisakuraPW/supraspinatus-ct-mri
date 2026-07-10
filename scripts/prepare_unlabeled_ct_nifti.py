@@ -116,7 +116,7 @@ def process_case(args: argparse.Namespace, case_dir: Path, output_dir: Path) -> 
         spacing = (float(spacing[0]), float(spacing[1]), float(fallback_z))
         z_spacing_source = "slice_thickness_fallback"
     case_out = output_dir / case_dir.name / "CT"
-    nii_path = case_out / "60kev.nii.gz"
+    nii_path = case_out / f"60kev{args.nifti_ext}"
     save_nifti_like(nii_path, volume.astype(np.float32), reference=None, spacing=spacing)
     preview_path = output_dir / "_previews" / f"{case_dir.name}_ct_nifti_preview.png"
     make_preview(volume, preview_path, case_dir.name, int(args.max_slices), tuple(args.window))
@@ -153,6 +153,7 @@ def main() -> None:
     parser.add_argument("--cases", nargs="*", default=None)
     parser.add_argument("--min-slices", type=int, default=20)
     parser.add_argument("--max-z-spacing-mm", type=float, default=8.0)
+    parser.add_argument("--nifti-ext", choices=(".nii", ".nii.gz"), default=".nii", help="Use .nii by default to avoid gzip corruption on unstable filesystems.")
     parser.add_argument("--max-slices", type=int, default=5)
     parser.add_argument("--window", nargs=2, type=float, default=(-100.0, 700.0))
     args = parser.parse_args()

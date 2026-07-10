@@ -371,7 +371,7 @@ def write_report(path: Path, rows: list[dict[str, object]], args: argparse.Names
     for row in rows:
         lines.append(
             f"| {row['case']} | {row['status']} | {row['quality_score']} | "
-            f"{row['totalseg_union_voxels']} | {row['guided_hu_raw_voxels']} | {row['fused_hu_voxels']} | "
+            f"{row.get('totalseg_union_voxels', '')} | {row.get('guided_hu_raw_voxels', '')} | {row.get('fused_hu_voxels', '')} | "
             f"{row['quality_reason']} | {row['preview_path']} |"
         )
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -399,11 +399,44 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     rows: list[dict[str, object]] = []
     for case_dir in discover_cases(Path(args.data_dir), args.cases):
-        row = process_case(args, case_dir, output_dir)
+        try:
+            row = process_case(args, case_dir, output_dir)
+        except Exception as exc:
+            try:
+                ct_path = find_ct_60kev(case_dir)
+            except Exception:
+                ct_path = ""
+            row = {
+                "case": case_dir.name,
+                "status": "failed_input_or_fusion_error",
+                "quality_score": 0.0,
+                "quality_reason": f"{type(exc).__name__}: {exc}",
+                "ct_path": str(ct_path),
+                "loaded_totalseg_masks": "",
+                "totalseg_source_voxels": "",
+                "hu_threshold_voxels": "",
+                "totalseg_union_voxels": "",
+                "totalseg_prior_dilated_voxels": "",
+                "guided_hu_raw_voxels": "",
+                "fused_hu_voxels": "",
+                "guided_to_hu_fraction": "",
+                "fused_to_hu_fraction": "",
+                "raw_component_count": "",
+                "kept_component_count": "",
+                "largest_component_fraction": "",
+                "preview_path": "",
+                "bbox_min_x": "",
+                "bbox_min_y": "",
+                "bbox_min_z": "",
+                "bbox_max_x": "",
+                "bbox_max_y": "",
+                "bbox_max_z": "",
+                "z_span": "",
+            }
         rows.append(row)
         print(
             f"{row['case']}: {row['status']} score={row['quality_score']} "
-            f"total={row['totalseg_union_voxels']} fused={row['fused_hu_voxels']}"
+            f"total={row.get('totalseg_union_voxels', '')} fused={row.get('fused_hu_voxels', '')}"
         )
     write_csv(output_dir / "totalseg_hu_fusion_summary.csv", rows)
     write_report(output_dir / "reports" / "totalseg_hu_fusion_report.md", rows, args)

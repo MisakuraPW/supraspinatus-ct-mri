@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gzip
+import os
 import struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -130,8 +131,10 @@ def save_nifti_like(
     payload = bytes(header) + b"\0\0\0\0" + np.asarray(arr, dtype=dtype).ravel(order="F").tobytes()
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(path.name + ".tmp")
     if str(path).endswith(".gz"):
-        with gzip.open(path, "wb") as f:
+        with gzip.open(tmp_path, "wb") as f:
             f.write(payload)
     else:
-        path.write_bytes(payload)
+        tmp_path.write_bytes(payload)
+    os.replace(tmp_path, path)
