@@ -23,6 +23,11 @@ def main() -> None:
     parser.add_argument("--require-gpu", action="store_true")
     parser.add_argument("--skip-existing", action="store_true")
     parser.add_argument("--continue-on-error", action="store_true")
+    parser.add_argument("--totalseg-home-dir", default=None, help="Set TOTALSEG_HOME_DIR for all TotalSegmentator calls.")
+    parser.add_argument("--totalseg-retries", type=int, default=3, help="Retry case inference when weight download is interrupted.")
+    parser.add_argument("--totalseg-retry-delay-seconds", type=float, default=30.0)
+    parser.add_argument("--no-download-weights-first", action="store_true", help="Do not pre-download TotalSegmentator weights before inference.")
+    parser.add_argument("--weight-download-retries", type=int, default=5)
     parser.add_argument("--run-fast", action="store_true", help="Run TotalSeg fast model.")
     parser.add_argument("--run-fullres", action="store_true", help="Run TotalSeg without --fast.")
     parser.add_argument("--skip-totalseg", action="store_true", help="Only run fusion using existing TotalSeg outputs.")
@@ -36,7 +41,6 @@ def main() -> None:
 
     if not args.run_fast and not args.run_fullres and not args.skip_totalseg:
         args.run_fast = True
-        args.run_fullres = True
 
     output_root = Path(args.output_root)
     fast_dir = Path(args.fast_dir) if args.fast_dir else output_root / "totalseg_fast"
@@ -64,8 +68,18 @@ def main() -> None:
             "--device",
             args.device,
             "--fast",
+            "--retries",
+            str(args.totalseg_retries),
+            "--retry-delay-seconds",
+            str(args.totalseg_retry_delay_seconds),
+            "--weight-download-retries",
+            str(args.weight_download_retries),
             *common_case_args,
         ]
+        if args.totalseg_home_dir:
+            cmd.extend(["--totalseg-home-dir", args.totalseg_home_dir])
+        if not args.no_download_weights_first:
+            cmd.append("--download-weights-first")
         if args.require_gpu:
             cmd.append("--require-gpu")
         if args.skip_existing:
@@ -82,8 +96,18 @@ def main() -> None:
             str(fullres_dir),
             "--device",
             args.device,
+            "--retries",
+            str(args.totalseg_retries),
+            "--retry-delay-seconds",
+            str(args.totalseg_retry_delay_seconds),
+            "--weight-download-retries",
+            str(args.weight_download_retries),
             *common_case_args,
         ]
+        if args.totalseg_home_dir:
+            cmd.extend(["--totalseg-home-dir", args.totalseg_home_dir])
+        if not args.no_download_weights_first:
+            cmd.append("--download-weights-first")
         if args.require_gpu:
             cmd.append("--require-gpu")
         if args.skip_existing:

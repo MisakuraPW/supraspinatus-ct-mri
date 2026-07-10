@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from _bootstrap import add_src_to_path
@@ -114,6 +115,49 @@ def build_command(args: argparse.Namespace, ct_path: Path, seg_dir: Path, report
     return cmd
 
 
+def build_env(args: argparse.Namespace) -> dict[str, str]:
+    env = os.environ.copy()
+    if args.totalseg_home_dir:
+        env["TOTALSEG_HOME_DIR"] = str(Path(args.totalseg_home_dir))
+    local_source = Path("refercode") / "TotalSegmentator"
+    if local_source.exists():
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = str(local_source) if not existing else str(local_source) + os.pathsep + existing
+    return env
+
+
+def resolve_download_command(command: str) -> list[str]:
+    if command != "auto":
+        parts = command.split()
+        return parts if parts else ["totalseg_download_weights"]
+    exe = shutil.which("totalseg_download_weights")
+    if exe:
+        return [exe]
+    local_cli = Path("refercode") / "TotalSegmentator" / "totalsegmentator" / "bin" / "totalseg_download_weights.py"
+    if local_cli.exists():
+        return [sys.executable, str(local_cli)]
+    return ["totalseg_download_weights"]
+
+
+def download_weights_with_retries(args: argparse.Namespace) -> None:
+    task_name = args.weight_task or ("total_fast" if args.fast else "total")
+    base_cmd = resolve_download_command(args.totalseg_download_command)
+    cmd = [*base_cmd, "-t", task_name]
+    env = build_env(args)
+    last_returncode = 0
+    for attempt in range(1, int(args.weight_download_retries) + 1):
+        print(f"pre-download TotalSegmentator weights: task={task_name} attempt={attempt}/{args.weight_download_retries}")
+        result = subprocess.run(cmd, cwd=str(Path.cwd()), text=True, env=env)
+        last_returncode = int(result.returncode)
+        if result.returncode == 0:
+            print("  weight pre-download ok")
+            return
+        print(f"  weight pre-download failed returncode={result.returncode}")
+        if attempt < int(args.weight_download_retries):
+            time.sleep(float(args.retry_delay_seconds))
+    raise SystemExit(f"ERROR: TotalSegmentator weight pre-download failed after {args.weight_download_retries} attempts (returncode={last_returncode}).")
+
+
 def run_case(args: argparse.Namespace, case_dir: Path, output_dir: Path) -> dict[str, object]:
     case_out = output_dir / case_dir.name
     seg_dir = case_out / "segmentations"
@@ -144,19 +188,31 @@ def run_case(args: argparse.Namespace, case_dir: Path, output_dir: Path) -> dict
         row.update({"status": "skipped_existing", "loaded_classes": " ".join(loaded), "combined_voxels": int(mask.sum()), "returncode": 0})
         return row
 
-    env = os.environ.copy()
-    local_source = Path("refercode") / "TotalSegmentator"
-    if local_source.exists():
-        existing = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = str(local_source) if not existing else str(local_source) + os.pathsep + existing
-    result = subprocess.run(cmd, cwd=str(Path.cwd()), text=True, capture_output=True, env=env)
-    (case_out / "stdout.txt").write_text(result.stdout, encoding="utf-8", errors="replace")
-    (case_out / "stderr.txt").write_text(result.stderr, encoding="utf-8", errors="replace")
-    row["returncode"] = result.returncode
-    if result.returncode != 0:
+    env = build_env(args)
+    result: subprocess.CompletedProcess[str] | None = None
+    status = ""
+    hint = ""
+    for attempt in range(1, int(args.retries) + 1):
+        result = subprocess.run(cmd, cwd=str(Path.cwd()), text=True, capture_output=True, env=env)
+        (case_out / f"stdout_attempt{attempt}.txt").write_text(result.stdout, encoding="utf-8", errors="replace")
+        (case_out / f"stderr_attempt{attempt}.txt").write_text(result.stderr, encoding="utf-8", errors="replace")
+        (case_out / "stdout.txt").write_text(result.stdout, encoding="utf-8", errors="replace")
+        (case_out / "stderr.txt").write_text(result.stderr, encoding="utf-8", errors="replace")
+        row["returncode"] = result.returncode
+        row["attempts"] = attempt
+        if result.returncode == 0:
+            break
         status, hint = classify_failure(result.stdout, result.stderr)
         row["status"] = status
         row["failure_hint"] = hint
+        retryable = "weight_download_interrupted" in hint
+        if not retryable or attempt >= int(args.retries):
+            return row
+        print(f"  retrying {case_dir.name} after {hint}; attempt {attempt + 1}/{args.retries}")
+        time.sleep(float(args.retry_delay_seconds))
+    if result is None:
+        row["status"] = "failed_no_subprocess_result"
+        row["failure_hint"] = "internal_error"
         return row
 
     image = load_nifti(ct_path)
@@ -187,6 +243,7 @@ def write_summary(rows: list[dict[str, object]], output_path: Path) -> None:
         "combined_mask",
         "report_path",
         "command",
+        "attempts",
     ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8-sig", newline="") as f:
@@ -209,6 +266,13 @@ def main() -> None:
     parser.add_argument("--stop-on-fail", action="store_true", help="Stop the batch immediately when one case fails.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--totalseg-command", default="auto", help="Command prefix, or 'auto' for installed/local CLI.")
+    parser.add_argument("--totalseg-home-dir", default=None, help="Set TOTALSEG_HOME_DIR, e.g. outputs/.../.totalsegmentator.")
+    parser.add_argument("--retries", type=int, default=1, help="Retry a case when weight download is interrupted.")
+    parser.add_argument("--retry-delay-seconds", type=float, default=30.0)
+    parser.add_argument("--download-weights-first", action="store_true", help="Run totalseg_download_weights before case inference.")
+    parser.add_argument("--weight-task", default=None, help="Override download task; defaults to total_fast for --fast, otherwise total.")
+    parser.add_argument("--weight-download-retries", type=int, default=3)
+    parser.add_argument("--totalseg-download-command", default="auto", help="Command prefix for totalseg_download_weights.")
     args = parser.parse_args()
 
     if args.device == "gpu":
@@ -225,6 +289,9 @@ def main() -> None:
                 "ERROR: --require-gpu was set, but torch.cuda.is_available() is False. "
                 "Fix the cloud CUDA/PyTorch environment or run with --device cpu."
             )
+
+    if args.download_weights_first and not args.dry_run:
+        download_weights_with_retries(args)
 
     rows = []
     for case_dir in discover_cases(Path(args.data_dir), args.cases):

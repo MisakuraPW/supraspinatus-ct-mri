@@ -35,7 +35,7 @@
 - 自动把两套输出送入融合脚本。
 - 打印下一步定位 sweep 的推荐命令。
 
-默认情况下，如果不指定 `--run-fast/--run-fullres/--skip-totalseg`，会同时跑 fast 和 full-res。
+默认情况下，如果不指定 `--run-fast/--run-fullres/--skip-totalseg`，只跑 fast。full-res 会触发另一套 TotalSegmentator `total` 权重下载，建议等 fast 跑通后再单独开启。
 
 ## 云端推荐运行方式
 
@@ -48,6 +48,44 @@ python scripts/run_totalseg_bone_segmentation_suite.py \
   --device gpu \
   --require-gpu \
   --skip-existing
+```
+
+如果要额外尝试 full-res，显式加：
+
+```bash
+python scripts/run_totalseg_bone_segmentation_suite.py \
+  --data-dir Data/label \
+  --output-root outputs/2026-07_totalseg_bone_segmentation_suite_fullres \
+  --device gpu \
+  --require-gpu \
+  --skip-existing \
+  --run-fullres
+```
+
+这个 suite 默认会先运行 `totalseg_download_weights` 预下载权重，并在下载中断时重试。若云端网络经常断，可以显式增加重试次数：
+
+```bash
+python scripts/run_totalseg_bone_segmentation_suite.py \
+  --data-dir Data/label \
+  --output-root outputs/2026-07_totalseg_bone_segmentation_suite \
+  --device gpu \
+  --require-gpu \
+  --skip-existing \
+  --weight-download-retries 10 \
+  --totalseg-retries 5 \
+  --totalseg-retry-delay-seconds 60
+```
+
+如果已经把本机下载好的 `.totalsegmentator` 权重缓存上传到云端，推荐直接指定缓存目录：
+
+```bash
+python scripts/run_totalseg_bone_segmentation_suite.py \
+  --data-dir Data/label \
+  --output-root outputs/2026-07_totalseg_bone_segmentation_suite \
+  --device gpu \
+  --require-gpu \
+  --skip-existing \
+  --totalseg-home-dir /mnt/workspace/supraspinatus-ct-mri/outputs/2026-07_totalseg_weights_cache/.totalsegmentator
 ```
 
 如果只想用 CPU，去掉 `--require-gpu` 并改成：
